@@ -1,0 +1,69 @@
+name: Combine Group Permissions
+
+on:
+  push:
+    paths:
+      - groups/*.json
+      - '!groups/all.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  combine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate groups/all.json
+        run: |
+          python <<'PY'
+          import json
+          from pathlib import Path
+
+          base_path = Path("groups")
+          files = sorted(
+              p for p in base_path.glob("*.json")
+              if p.name != "all.json" and p.is_file()
+          )
+
+          combined = {}
+
+          for file_path in files:
+              key = file_path.stem
+              try:
+                  parsed = json.loads(file_path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError as error:
+                  raise ValueError(f"Invalid JSON in {file_path.as_posix()}: {error.msg}") from error
+
+              if not isinstance(parsed, list):
+                  raise ValueError(f"Expected {file_path.as_posix()} to contain a JSON array.")
+
+              combined[key] = parsed
+
+          output = json.dumps(combined, indent=2) + "\n"
+          (base_path / "all.json").write_text(output, encoding="utf-8")
+          PY
+
+      - name: Check if generated file changed
+        id: check_changes
+        if: ${{ github.ref_name == github.event.repository.default_branch }}
+        run: |
+          if [ -n "$(git status --porcelain -- groups/all.json)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push generated file
+        if: ${{ github.ref_name == github.event.repository.default_branch && steps.check_changes.outputs.changed == 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add groups/all.json
+          git commit -m "chore(groups): regenerate groups/all.json"
+          git push
