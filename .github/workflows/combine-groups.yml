@@ -67,3 +67,17 @@ jobs:
           git add groups/all.json
           git commit -m "chore(groups): regenerate groups/all.json"
           git push
+
+      # Rebuilds the website (strikeforce.zone) so its profile badges pick up the new groups.
+      # Runs after a regenerated all.json was pushed, or on a manual run as a "redeploy" button.
+      # Needs the VERCEL_DEPLOY_HOOK_URL secret (Vercel project > Settings > Git > Deploy Hooks).
+      - name: Redeploy website
+        if: ${{ github.ref_name == github.event.repository.default_branch && (steps.check_changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch') }}
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "::warning::VERCEL_DEPLOY_HOOK_URL is not set, skipping the website redeploy."
+            exit 0
+          fi
+          curl --fail --silent --show-error --retry 3 -X POST "$DEPLOY_HOOK_URL"
